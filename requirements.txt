@@ -1,0 +1,9 @@
+
+Flask
+requests
+slack-sdk
+customtkinter
+openai
+google-auth-oauthlib
+google-auth
+google-api-python-client
