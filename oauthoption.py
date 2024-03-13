@@ -13,7 +13,7 @@ import random
 import atexit
 import signal
 import sys
-from flask import Flask, request, jsonify, Blueprint
+from flask import Flask, request, jsonify, Blueprint, redirect, current_app, url_for
 import queue
 
 # Additional imports specific to Google Sheets API and OAuth
@@ -1071,13 +1071,52 @@ def start_oauth_jira():
     except Exception as e:
         return jsonify({"status": "Failed to initiate Jira OAuth flow", "error": str(e)})
 
+@oauth_bp.route('/jira-callback', methods=['GET'])
+def jira_oauth_callback():
+    code = request.args.get('code')
+    if code:
+        # Exchange the code for a token
+        exchange_code_for_token(code)
+        return "Authorization successful. You may close this window."
+    else:
+        return "Authorization failed."
 
+@oauth_bp.route('/start-oauth-sheets', methods=['GET'])
 def start_oauth_sheets():
     try:
         start_oauth_and_server()  # Function to initiate Google Sheets OAuth flow
         return jsonify({"status": "Google Sheets OAuth flow initiated. Check your browser."})
     except Exception as e:
         return jsonify({"status": "Failed to initiate Google Sheets OAuth flow", "error": str(e)})
+
+@oauth_bp.route('/sheets-callback', methods=['GET'])
+def sheets_oauth_callback():
+    # Assuming `flow` is globally accessible or retrievable in this context,
+    # which might require you to adjust how `flow` is instantiated and stored.
+    # One approach is to store `flow` in the Flask app's context or a session.
+    
+    # This example assumes `flow` is accessible as a global variable or similar.
+    global flow
+    
+    if 'code' not in request.args:
+        # No code in query string, so OAuth flow was not completed.
+        return "Authorization failed or was cancelled by the user.", 400
+
+    # Fetch the authorization code from the query string
+    authorization_response = request.url
+    try:
+        # Use the authorization code to fetch the token
+        flow.fetch_token(authorization_response=authorization_response)
+
+        # Store the credentials
+        creds = flow.credentials
+        save_credentials(creds)
+
+        # Redirect or respond that the authorization was successful
+        return "Authorization successful. You may close this window."
+    except Exception as e:
+        current_app.logger.error(f"Failed to fetch token: {e}")
+        return "Failed to complete authorization.", 500
 
 def initiate_and_send_data_with_delay():
     create_thread()  # Assuming this function initializes a thread and sets `thread_id`
