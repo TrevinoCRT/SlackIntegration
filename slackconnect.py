@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import json
 from flask import Flask
-from oauthoption import oauth_bp  
+from oauthoption import oauth_bp 
 
 load_dotenv()  # Load environment variables
 
@@ -43,6 +43,89 @@ def verify_slack_request(request):
     slack_signature = request.headers.get('X-Slack-Signature')
     
     return hmac.compare_digest(my_signature, slack_signature)
+
+block_kit_payload = {
+	"blocks": [
+		{
+			"type": "section",
+			"text": {
+				"type": "mrkdwn",
+				"text": "Welcome to the *Jira Story and Epic ID Bot*! This bot integrates Jira and Google Sheets with Slack, allowing you to manage projects and data seamlessly from within Slack."
+			}
+		},
+		{
+			"type": "section",
+			"text": {
+				"type": "mrkdwn",
+				"text": "To get started, you'll need to authorize the bot to access your Jira and Google Sheets accounts. Please click the buttons below to initiate the OAuth process."
+			}
+		},
+		{
+			"type": "divider"
+		},
+		{
+			"type": "actions",
+			"elements": [
+				{
+					"type": "button",
+					"text": {
+						"type": "plain_text",
+						"text": "Authorize Jira",
+						"emoji": True
+					},
+					"value": "jira_oauth",
+					"url": "https://jiraslackgpt-592ed3dfdc03.herokuapp.com/oauth/jira/callback"
+				},
+				{
+					"type": "button",
+					"text": {
+						"type": "plain_text",
+						"text": "Authorize Google Sheets",
+						"emoji": True
+					},
+					"value": "sheets_oauth",
+					"url": "https://jiraslackgpt-592ed3dfdc03.herokuapp.com/oauth/sheets/callback"
+				}
+			]
+		},
+		{
+			"type": "section",
+			"text": {
+				"type": "mrkdwn",
+				"text": "After authorization, you can start interacting with the bot by sending messages. For example, you can ask it to fetch data from Google Sheets or create and manage Jira issues directly from Slack."
+			}
+		},
+		{
+			"type": "section",
+			"text": {
+				"type": "mrkdwn",
+				"text": "If you need help or want to learn more about what you can do, just type `help` to see a list of commands and features."
+			}
+		}
+	]
+}
+
+
+def send_welcome_message(channel_id):
+    """
+    Sends a welcome message to a specified Slack channel.
+    
+    Parameters:
+    - channel_id (str): The ID of the channel to send the message to.
+    """
+    url = "https://slack.com/api/chat.postMessage"
+    headers = {
+        "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "channel": channel_id,
+        "blocks": block_kit_payload["blocks"]
+    }
+    response = requests.post(url, headers=headers, data=json.dumps(payload))
+    if not response.ok:
+        print(f"Error sending welcome message to Slack: {response.text}")
+
 
 @app.route('/slack/interactions', methods=['POST'])
 def slack_interactions():
