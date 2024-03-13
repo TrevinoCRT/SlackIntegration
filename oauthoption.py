@@ -29,6 +29,7 @@ import urllib.request
 from urllib.parse import urlparse, parse_qs
 import uuid
 import logging
+import base64
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def generate_state_parameter():
@@ -62,18 +63,19 @@ API_SERVICE_NAME = 'sheets'
 API_VERSION = 'v4'
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-directory = os.path.dirname(os.path.realpath(__file__))
-CLIENT_SECRETS_FILE = os.path.join(directory, 'client_secret.json')
-
-
 thread_id = None
 last_displayed_message_id = None
 displayed_message_ids = set()  # Keep track of displayed message IDs
 # OAuth and Google Sheets Integration
 # Function to start the OAuth process and server for Google Sheets API
+# Inside your existing function or setup
 def start_oauth_and_server():
+    # Decode the client secrets from an environment variable
+    client_secrets_json = base64.b64decode(os.getenv("GOOGLE_CLIENT_SECRET_BASE64")).decode('utf-8')
+    client_secrets = json.loads(client_secrets_json)
+
     # Initialize OAuth flow with client secrets and scopes
-    flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
+    flow = Flow.from_client_config(client_secrets, SCOPES)
     flow.redirect_uri = 'http://localhost:8081/sheets-callback'
 
     # Open the authorization URL in the user's browser
