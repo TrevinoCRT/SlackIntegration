@@ -74,7 +74,7 @@ block_kit_payload = {
 						"emoji": True
 					},
 					"value": "jira_oauth",
-					"url": "https://jiraslackgpt-592ed3dfdc03.herokuapp.com/oauth/jira/callback"
+					"url": OAUTH_JIRA_URL
 				},
 				{
 					"type": "button",
@@ -84,7 +84,7 @@ block_kit_payload = {
 						"emoji": True
 					},
 					"value": "sheets_oauth",
-					"url": "https://jiraslackgpt-592ed3dfdc03.herokuapp.com/oauth/sheets/callback"
+					"url": OAUTH_SHEETS_URL
 				}
 			]
 		},
