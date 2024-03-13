@@ -76,7 +76,7 @@ def start_oauth_and_server():
 
     # Initialize OAuth flow with client secrets and scopes
     flow = Flow.from_client_config(client_secrets, SCOPES)
-    flow.redirect_uri = 'http://localhost:8081/sheets-callback'
+    flow.redirect_uri = 'https://jiraslackgpt-592ed3dfdc03.herokuapp.com/start-oauth-sheets'
 
     # Open the authorization URL in the user's browser
     auth_url, _ = flow.authorization_url(prompt='consent')
