@@ -1,8 +1,5 @@
 import requests
 from requests.exceptions import RequestException, Timeout
-from tkinter import scrolledtext, messagebox, font, simpledialog
-import customtkinter as ctk
-import tkinter as tk
 import json
 import time
 import openai
@@ -16,7 +13,7 @@ import random
 import atexit
 import signal
 import sys
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Blueprint
 import queue
 
 # Additional imports specific to Google Sheets API and OAuth
@@ -37,19 +34,27 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 def generate_state_parameter():
     return str(uuid.uuid4())
 
-CLIENT_ID = 'client id'
-CLIENT_SECRET = 'client secret'
-REDIRECT_URI = 'http://localhost:8080/jira-callback'
-TOKEN_URL = 'https://auth.atlassian.com/oauth/token'
-SCOPES = 'read:jira-work write:jira-work manage:jira-project manage:jira-webhook manage:jira-configuration read:me read:account'  # Replace with actual scopes
-AUTHORIZATION_URL = 'https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id={client_id}&scope={scopes}&redirect_uri={redirect_uri}&state={state}&response_type=code&prompt=consent'.format(
-    client_id=CLIENT_ID,
-    scopes=SCOPES,
-    redirect_uri=REDIRECT_URI,
-    state=generate_state_parameter()
-)
-# Hardcoded Spreadsheet ID
-SPREADSHEET_ID = "1Ua0bb50NXtE70rhkhY27LYS5LTiJNmFSqx_O_n6BtoM"  # Replace with your actual spreadsheet ID
+
+# Load environment variables
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ASSISTANT_ID = os.getenv("ASSISTANT_ID")
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+REDIRECT_URI = os.getenv("REDIRECT_URI")
+TOKEN_URL = os.getenv("TOKEN_URL")
+# For SCOPES, since it's a space-separated list, ensure it's properly formatted if needed
+SCOPES = os.getenv("SCOPES", "read:jira-work write:jira-work manage:jira-project manage:jira-webhook manage:jira-configuration read:me read:account")
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+
+# URLs for OAuth and message processing
+OAUTH_JIRA_URL = os.getenv("OAUTH_JIRA_URL")
+OAUTH_SHEETS_URL = os.getenv("OAUTH_SHEETS_URL")
+PROCESS_MESSAGE_URL = os.getenv("PROCESS_MESSAGE_URL")
+GET_LATEST_MESSAGES_URL = os.getenv("GET_LATEST_MESSAGES_URL")
+START_ASSISTANT_URL = os.getenv("START_ASSISTANT_URL")
+
+# Update the AUTHORIZATION_URL to use the environment variables
+AUTHORIZATION_URL = f'https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id={CLIENT_ID}&scope={SCOPES}&redirect_uri={REDIRECT_URI}&state={generate_state_parameter()}&response_type=code&prompt=consent'
 
 # Update for Google Sheets API
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -61,8 +66,7 @@ directory = os.path.dirname(os.path.realpath(__file__))
 CLIENT_SECRETS_FILE = os.path.join(directory, 'client_secret.json')
 
 
-# Global flag to control polling
-
+thread_id = None
 last_displayed_message_id = None
 displayed_message_ids = set()  # Keep track of displayed message IDs
 # OAuth and Google Sheets Integration
@@ -164,11 +168,6 @@ def retrieve_and_send_data():
             print(f"[ERROR] Failed to add message to thread: {add_message_response['error']}")
             return
         print("[INFO] Training data update message added to thread.")
-
-        conversation_text.config(state='normal')
-        conversation_text.insert(tk.END, f"You: {training_data_message}\n")
-        conversation_text.config(state='disabled')
-        print("[INFO] GUI updated with training data update message.")
 
         run_status_response = run_thread(thread_id, ASSISTANT_ID)
         if "error" in run_status_response:
@@ -324,13 +323,11 @@ def get_issue_details(token, cloud_id, issue_id_or_key, fields=None, fields_by_k
 # Function to Retrieve Jira Issue
 def retrieve_jira_issue(issue_key):
     if not issue_key:
-        messagebox.showwarning("Warning", "Please enter a Jira Issue Key")
         print("[WARNING] No Jira Issue Key provided. Operation aborted.")  # Added robust print statement
         return
 
     token = get_saved_access_token()
     if not token:
-        messagebox.showerror("Error", "No access token found. Please authenticate with Jira first.")
         print("[ERROR] No access token found. User needs to authenticate.")  # Added robust print statement
         return
 
@@ -341,7 +338,6 @@ def retrieve_jira_issue(issue_key):
         print(f"[SUCCESS] Issue retrieved successfully. Issue details (limited): {str(issue_details)[:100]}...")  # Added content limit to print statement
         return issue_details
     except Exception as e:
-        messagebox.showerror("Error", f"Error retrieving issue from Jira: {e}")
         print(f"[ERROR] Exception occurred while retrieving issue from Jira. Error: {str(e)[:100]}...")  # Added content limit to print statement
         return None
 
@@ -489,30 +485,7 @@ def format_jira_issue(raw_issue_details):
     }
     return formatted_issue
 
-#Start of Assistants API Functions
-def get_openai_api_key():
-    config = configparser.ConfigParser()
-    directory = os.path.dirname(os.path.realpath(__file__))
-    config_file = os.path.join(directory, 'config.ini')
-    if not os.path.exists(config_file):
-        os.makedirs(os.path.dirname(config_file), exist_ok=True)
-        # Use Tkinter dialog to prompt for the OpenAI API key
-        root = tk.Tk()
-        root.withdraw()  # Hide the main window
-        openai_api_key = simpledialog.askstring("OpenAI API Key", "Enter your OpenAI API key:", parent=root)
-        if openai_api_key:
-            config['DEFAULT'] = {'OpenAI_API_Key': openai_api_key}
-            with open(config_file, 'w') as configfile:
-                config.write(configfile)
-        root.destroy()
-    else:
-        config.read(config_file)
-        openai_api_key = config['DEFAULT']['OpenAI_API_Key']
-    return openai_api_key
 
-OPENAI_API_KEY = get_openai_api_key()
-ASSISTANT_ID = "asst_S1BeMtNw12Zi763tbTE4y4Tg"
-thread_id = None
 # Initialize the global variable to track the last displayed message ID
 
 def delete_thread(thread_id):
@@ -558,11 +531,6 @@ def create_thread(messages=None, metadata=None):
     if response.status_code == 200:
         thread_id = response.json()['id']
         welcome_message = "Hey there - I’m the Kohl’s Jira User Story and Issue Assistance Bot, to begin please set up your oAuth for Jira and Sheets, with their corressponding buttons, and then type out the issue key you would like me to work on, or the epic-id you would like me to analyze the issues of-."
-        conversation_text.config(state='normal')
-        conversation_text.tag_configure('assistant_author', foreground='pink')
-        conversation_text.insert(tk.END, "Kohl's Jira Assistant: ", 'assistant_author')
-        conversation_text.insert(tk.END, f"{welcome_message}\n")
-        conversation_text.config(state='disabled')
 
 def add_message_to_thread(thread_id, role, content, file_ids=None, metadata=None):
     url = f"https://api.openai.com/v1/threads/{thread_id}/messages"
@@ -749,7 +717,6 @@ def get_run_status(thread_id, run_id):
         response = requests.get(url, headers=headers, timeout=25)
         if response.status_code == 200:
             run_status = response.json().get('status')
-            update_status_message(run_status)
             if run_status in ['queued', 'in_progress']:
                 return {"status": run_status, "message": "Run is either queued or in progress."}
             elif run_status == 'completed':
@@ -924,38 +891,6 @@ def get_runs(thread_id, limit=100, order="desc", after=None, before=None):
         return {"error": error_message}
 
 
-def send_message():
-    global thread_id
-
-    if not thread_id:
-        print("[ERROR] Thread not initialized. Unable to send message.")
-        return
-
-    user_message = message_entry.get("1.0", "end-1c")
-
-    # Clear the entry widget
-    message_entry.delete("1.0", "end")
-
-    # Send the user's message to the thread
-    add_message_to_thread(thread_id, "user", user_message)
-    print(f"[INFO] Message sent to thread. Message (truncated to 100 chars): {user_message[:100]}")
-
-    # Display the message directly without the typing effect
-    conversation_text.config(state='normal')
-    conversation_text.insert(tk.END, f"User: {user_message}\n", 'user_message')
-    conversation_text.config(state='disabled')
-    print("[INFO] Message displayed in GUI.")
-
-    try:
-        # Call run_thread to process the user message
-        run_status_response = run_thread(thread_id, ASSISTANT_ID)
-        run_id = run_status_response.get("id")  # Extract the run ID from the response
-        print(f"[INFO] Run thread initiated. Run ID: {run_id}")
-
-        # Handle the run status in a separate function
-        handle_run_status(thread_id, run_id)
-    except Exception as e:
-        print(f"[ERROR] An error occurred while sending message or initiating run thread. Error: {str(e)[:100]}")  # Truncate error message
 
 def handle_run_status(thread_id, run_id):
     print("Starting to check the status of the run in a loop with a delay.")
@@ -1044,225 +979,89 @@ def handle_run_status(thread_id, run_id):
     # After the run is completed, fetch and display the assistant's response
     check_and_display_new_messages(run_id)
 
-def check_and_display_new_messages(run_id):
-    global thread_id
-    global last_displayed_message_id  # Ensure this global variable is accessible within this function
-    polling_interval = 3  # Initial polling interval in seconds
-    logging.debug(f"Polling for new messages with interval: {polling_interval} seconds")
-    should_continue_polling = True  # Flag to indicate whether polling should continue
 
-    def poll_messages(run_id):
-        nonlocal polling_interval, should_continue_polling  # Ensure these are accessible
-        print(f"Polling messages for run_id: {run_id[:10]}...")  # Limiting run_id printout for brevity
-        
-        run_status_response = get_run_status(thread_id, run_id)
-        print(f"Run status response (limited): {str(run_status_response)[:50]}")  # Limiting content for brevity
-        
-        if run_status_response['status'] in ['completed', 'requires_action']:
-            should_continue_polling = False  # Stop polling if run is completed or requires action
-            print(f"Polling stopped. Run status: {run_status_response['status']}")
-            if run_status_response['status'] == 'completed':
-                fetch_and_display_messages(run_id)
-        else:
-            print(f"Scheduling next poll in {polling_interval} seconds.")
-            if polling_interval < 15:
-                polling_interval += 3  # Increment the polling interval by 3 seconds, up to a maximum of 15 seconds
-            threading.Timer(polling_interval, lambda: poll_messages(run_id)).start()
+def send_message_to_slack(channel_id, message, slack_bot_token):
+    url = "https://slack.com/api/chat.postMessage"
+    headers = {
+        "Authorization": f"Bearer {slack_bot_token}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "channel": channel_id,
+        "text": message
+    }
+    response = requests.post(url, headers=headers, json=payload)
+    if not response.ok:
+        print(f"Error sending message to Slack: {response.text}")
 
-    def fetch_and_display_messages(run_id):
-        global thread_id
-        global last_displayed_message_id
-        global displayed_message_ids
-
-        print(f"[INFO] Initiating fetch for messages. Thread ID: {thread_id[:10]}, Run ID: {run_id[:10]}")
-        messages_response = get_messages(thread_id, order="asc")
-        print(f"[DEBUG] Messages response (truncated): {str(messages_response)[:100]}")
-
-        if messages_response.get("data"):
-            messages = messages_response["data"]
-            print(f"[INFO] Total messages fetched: {len(messages)}")
-
-            # Filter out messages that have already been displayed
-            new_messages = [msg for msg in messages if msg["id"] not in displayed_message_ids]
-            print(f"[INFO] New messages identified for display: {len(new_messages)}")
-
-            for message in new_messages:
-                role = message["role"]
-                content_parts = [part["text"]["value"] for part in message["content"] if part["type"] == "text"]
-                content = "".join(content_parts)
-                print(f"[DISPLAY] Message ID: {message['id']}, Role: {role}, Content (truncated): {content[:100]}")
-
-                # Display the message and then mark it as displayed
-                display_message(message["id"], role, content)
-                # Note: The addition to displayed_message_ids should now happen inside display_message
-
-            if new_messages:
-                # Update last_displayed_message_id based on the last message in the new_messages list
-                last_displayed_message_id = new_messages[-1]["id"]
-                print(f"[UPDATE] Last displayed message ID updated to: {last_displayed_message_id}")
-            else:
-                print("[INFO] No new messages to display. Last displayed message ID remains unchanged.")
-
-    poll_messages(run_id)
-
-def update_gui(message_id, role, content, displayed_message_ids, conversation_text, root):
+def display_message(message_id, role, content, channel_id, slack_bot_token, displayed_message_ids):
     if message_id in displayed_message_ids:
         return
 
-    conversation_text.config(state='normal')
+    # Assuming 'role' could be used to customize the message, e.g., prefixing with "Assistant:" or "User:"
+    prefix = "Assistant:" if role == "assistant" else "User:"
+    full_message = f"{prefix} {content}"
+    send_message_to_slack(channel_id, full_message, slack_bot_token)
 
-    if conversation_text.get("end-2l", tk.END).strip() == "Assistant is typing...":
-        end_line_index = conversation_text.index("end-1c linestart")
-        conversation_text.delete(end_line_index, tk.END)
-
-    tag = 'user_author' if role == "user" else 'assistant_author'
-    author = "You" if role == "user" else "Assistant"
-
-    conversation_text.tag_configure('assistant_author', foreground='pink')
-    conversation_text.tag_configure('user_author', foreground='lightblue')
-
-    # Insert the author tag
-    conversation_text.insert(tk.END, f"\n{author}: ", tag)
-
-    # Process and insert the content
-    process_and_insert_content(content, conversation_text)
-
-    conversation_text.config(state='disabled')
+    # Mark the message as displayed
     displayed_message_ids.add(message_id)
 
-def display_message(message_id, role, content):
-    global displayed_message_ids
+def check_and_display_new_messages(run_id, channel_id, slack_bot_token, displayed_message_ids):
     global thread_id
-    global root  # Ensure root is globally accessible
+    polling_interval = 3  # Initial polling interval in seconds
+    logging.debug(f"Polling for new messages with interval: {polling_interval} seconds")
+    should_continue_polling = True
 
-    # Pass necessary parameters to update_gui
-    update_gui(message_id, role, content, displayed_message_ids, conversation_text, root)
-
-def process_and_insert_content(content, conversation_text):
-    # Define insert_with_url_detection at the beginning of the function
-    def insert_with_url_detection(text):
-        # Regular expression to match URLs
-        url_pattern = r'https?://[^\s]+'
-        start = 0
-        for match in re.finditer(url_pattern, text):
-            # Insert text up to the URL
-            conversation_text.insert(tk.END, text[start:match.start()])
-            # Insert leading space for padding (make clickable area larger)
-            conversation_text.insert(tk.END, " ")
-            # Insert the URL with a hyperlink tag
-            url = match.group()
-            hyperlink_tag = "hyperlink_" + str(uuid.uuid4())  # Unique tag for each hyperlink
-            conversation_text.tag_configure(hyperlink_tag, foreground="blue", underline=1)
-            # Apply the tag to the URL and surrounding spaces
-            conversation_text.insert(tk.END, " " + url + " ", hyperlink_tag)
-            # Bind the click event to open the URL in a web browser
-            conversation_text.tag_bind(hyperlink_tag, "<Button-1>", lambda event, url=url: webbrowser.open(url))
-            # Insert trailing space for padding (make clickable area larger)
-            conversation_text.insert(tk.END, " ")
-            start = match.end()
-        # Insert any remaining text after the last URL
-        conversation_text.insert(tk.END, text[start:])
-
-    lines = content.split('\n')
-    for line in lines:
-        # Existing formatting logic
-        if line.startswith("### "):
-            line = line[4:]
-            title_tag = "title_text"
-            conversation_text.tag_configure(title_tag, font=("Roboto", 18, "bold"))
-            conversation_text.insert(tk.END, f"{line}\n", title_tag)
-        elif re.match(r'^(\-|\*|\d+\.) \*\*.*\*\*$', line):
-            line = re.sub(r'\*\*(.*)\*\*', r'\1', line)
-            bold_tag = "list_bold_text"
-            conversation_text.tag_configure(bold_tag, font=("Roboto", 17, "bold"))
-            conversation_text.insert(tk.END, f"{line}\n", bold_tag)
-        elif line.startswith("**") and line.endswith("**"):
-            line = line[2:-2]
-            bold_tag = "bold_text"
-            conversation_text.tag_configure(bold_tag, font=("Roboto", 18, "bold"))
-            conversation_text.insert(tk.END, f"{line}\n", bold_tag)
-        elif re.match(r'^(\-|\*|\d+\.) \*\*.*\*\*$', line):
-            line = re.sub(r'\*\*(.*)\*\*', r'\1', line)
-            bold_tag = "list_bold_text"
-            conversation_text.tag_configure(bold_tag, font=("Roboto", 17, "bold"))
-            conversation_text.insert(tk.END, f"{line}\n", bold_tag)
-        elif re.match(r'^(\d+\.) \*\*.*\*\*$', line):
-            line = re.sub(r'\*\*(.*)\*\*', r'\1', line)
-            bold_tag = "list_bold_text"
-            conversation_text.tag_configure(bold_tag, font=("Roboto", 17, "bold"))
-            conversation_text.insert(tk.END, f"{line}\n", bold_tag)
-        elif re.match(r'^([a-zA-Z]\.) \*\*.*\*\*$', line):
-            line = re.sub(r'\*\*(.*)\*\*', r'\1', line)
-            bold_tag = "list_bold_text"
-            conversation_text.tag_configure(bold_tag, font=("Roboto", 17, "bold"))
-            conversation_text.insert(tk.END, f"{line}\n", bold_tag)
-        elif line.startswith("#### "):
-            line = line[5:]
-            subtitle_tag = "subtitle_text"
-            conversation_text.tag_configure(subtitle_tag, font=("Roboto", 16, "bold"))
-            conversation_text.insert(tk.END, f"{line}\n", subtitle_tag)
+    def poll_messages(run_id):
+        nonlocal polling_interval, should_continue_polling
+        logging.debug(f"Polling messages for run_id: {run_id[:10]}...")
+        
+        run_status_response = get_run_status(thread_id, run_id)
+        logging.debug(f"Run status response (limited): {str(run_status_response)[:50]}")
+        
+        if run_status_response['status'] in ['completed', 'requires_action']:
+            should_continue_polling = False
+            logging.info(f"Polling stopped. Run status: {run_status_response['status']}")
+            if run_status_response['status'] == 'completed':
+                fetch_and_display_messages(run_id, channel_id, slack_bot_token, displayed_message_ids)
         else:
-            insert_with_url_detection(line + '\n')  # Call the URL detection function for regular text
+            logging.info(f"Scheduling next poll in {polling_interval} seconds.")
+            if polling_interval < 15:
+                polling_interval += 3
+            threading.Timer(polling_interval, lambda: poll_messages(run_id)).start()
 
-def create_scrolled_text(root):
-    # Create a frame to hold the text widget and the scrollbar
-    frame = tk.Frame(root)
-    frame.grid(row=0, column=0, columnspan=2, padx=50, sticky="nsew")
+    poll_messages(run_id)
 
-    # Create a text widget with the desired appearance, including line spacing
-    text_widget = tk.Text(frame, font=("Roboto", 16), wrap=tk.WORD, padx=50, pady=10, borderwidth=0, highlightthickness=0, bg=root.cget('bg'), spacing3=0.5)
-    text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+def fetch_and_display_messages(run_id, channel_id, slack_bot_token, displayed_message_ids):
+    global thread_id
+    logging.info(f"[INFO] Initiating fetch for messages. Thread ID: {thread_id[:10]}, Run ID: {run_id[:10]}")
+    messages_response = get_messages(thread_id, order="asc")
+    logging.debug(f"[DEBUG] Messages response (truncated): {str(messages_response)[:100]}")
 
-    # Create a scrollbar that blends with the background
-    scrollbar = ctk.CTkScrollbar(frame, command=text_widget.yview, fg_color=root.cget('bg'))
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    if messages_response.get("data"):
+        messages = messages_response["data"]
+        logging.info(f"[INFO] Total messages fetched: {len(messages)}")
 
-    # Configure the text widget to use the scrollbar
-    text_widget.config(yscrollcommand=scrollbar.set)
+        new_messages = [msg for msg in messages if msg["id"] not in displayed_message_ids]
+        logging.info(f"[INFO] New messages identified for display: {len(new_messages)}")
 
-    return text_widget
+        for message in new_messages:
+            role = message["role"]
+            content_parts = [part["text"]["value"] for part in message["content"] if part["type"] == "text"]
+            content = "".join(content_parts)
+            display_message(message["id"], role, content, channel_id, slack_bot_token, displayed_message_ids)
 
-
-def create_message_entry(root):
-    # Create a frame to hold the text widget and the scrollbar
-    entry_frame = tk.Frame(root)
-    entry_frame.grid(row=1, column=0, sticky="ew", padx=60)
-    root.grid_rowconfigure(1, weight=1)
-    root.grid_columnconfigure(0, weight=1)
-
-    # Fetch the background color of the root window
-    bg_color = root.cget('bg')
-
-    # Create a text widget for multiline input with a matching background color
-    message_entry = tk.Text(entry_frame, height=4, wrap="word", font=("Roboto", 16), padx=10, pady=10, borderwidth=0, highlightthickness=0, bg=bg_color)
-    message_entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-    # Bind the Enter key while focusing on message_entry to send_message function
-    # and prevent default newline insertion unless Shift is pressed
-    def handle_enter_key(event):
-        if event.state & 0x0001:  # Shift key is down
-            return "break"  # Proceed with the default behavior (insert newline)
+        if new_messages:
+            last_displayed_message_id = new_messages[-1]["id"]
+            logging.info(f"[UPDATE] Last displayed message ID updated to: {last_displayed_message_id}")
         else:
-            send_message()  # Call the send_message function
-            return "break"  # Prevent the default behavior
+            logging.info("[INFO] No new messages to display. Last displayed message ID remains unchanged.")
 
-    message_entry.bind("<Return>", handle_enter_key)
 
-    # Continue with the scrollbar setup and return statement...
-    scrollbar = tk.Scrollbar(entry_frame, command=message_entry.yview)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    message_entry.config(yscrollcommand=scrollbar.set)
-    scrollbar.config(bg=bg_color)
+# Create a Blueprint for OAuth-related routes
+oauth_bp = Blueprint('oauth_bp', __name__)
 
-    return message_entry
-
-app = Flask(__name__)
-command_queue = queue.Queue()
-
-def flask_thread_function():
-    app.run(port=5001, debug=True, use_reloader=False)
-
-@app.route('/start-oauth-jira', methods=['GET'])
+@oauth_bp.route('/start-oauth-jira', methods=['GET'])
 def start_oauth_jira():
     try:
         start_oauth_flow()  # Function to initiate Jira OAuth flow
@@ -1270,7 +1069,7 @@ def start_oauth_jira():
     except Exception as e:
         return jsonify({"status": "Failed to initiate Jira OAuth flow", "error": str(e)})
 
-@app.route('/start-oauth-sheets', methods=['GET'])
+
 def start_oauth_sheets():
     try:
         start_oauth_and_server()  # Function to initiate Google Sheets OAuth flow
@@ -1278,12 +1077,65 @@ def start_oauth_sheets():
     except Exception as e:
         return jsonify({"status": "Failed to initiate Google Sheets OAuth flow", "error": str(e)})
 
-@app.route('/start-assistant', methods=['POST'])
-def start_assistant():
-    command_queue.put(("create_thread", None))
-    return jsonify({"status": "Assistant start command received"})
+def initiate_and_send_data_with_delay():
+    create_thread()  # Assuming this function initializes a thread and sets `thread_id`
+    time.sleep(3)  # Wait for 3 seconds
+    retrieve_and_send_data()  # Call the function to retrieve and send data
 
-@app.route('/process-message', methods=['POST'])
+@oauth_bp.route('/start-assistant', methods=['POST'])
+def start_assistant():
+    threading.Thread(target=initiate_and_send_data_with_delay, daemon=True).start()
+    return jsonify({"status": "Assistant start command received, initiating in 3 seconds"})
+
+
+def wait_for_run_completion(thread_id, run_id, max_wait_time=60):
+    logging.info(f"Starting to wait for run completion. Thread ID: {thread_id}, Run ID: {run_id}")
+    start_time = time.time()
+    polling_interval = 1  # Start with a 1-second delay
+
+    for attempt in range(int(max_wait_time / polling_interval)):
+        elapsed_time = time.time() - start_time
+        if elapsed_time > max_wait_time:
+            logging.warning("Max wait time exceeded for run completion.")
+            return False
+
+        logging.debug(f"Checking run status. Attempt: {attempt + 1}, Polling Interval: {polling_interval} seconds")
+        run_status_response = get_run_status(thread_id, run_id)
+        logging.debug(f"Run status response: {run_status_response}")
+
+        if run_status_response['status'] in ['completed', 'requires_action']:
+            logging.info(f"Run completed or requires action. Status: {run_status_response['status']}")
+            return True
+
+        time.sleep(polling_interval)
+        polling_interval = min(polling_interval * 2, 15)  # Increase the interval, up to a maximum of 15 seconds
+
+    return False
+
+def get_latest_messages():
+    global thread_id, displayed_message_ids, last_run_id
+
+    logging.info("Fetching latest messages.")
+    try:
+        if not wait_for_run_completion(thread_id, last_run_id):
+            logging.error("Run did not complete in the expected time frame.")
+            return jsonify({"error": "Run did not complete in the expected time frame"}), 408
+
+        logging.info("Run completed. Fetching messages.")
+        messages_response = get_messages(thread_id, order="asc")
+        if messages_response.get("data"):
+            messages = messages_response["data"]
+            new_messages = [msg for msg in messages if msg["id"] not in displayed_message_ids]
+            displayed_message_ids.update([msg["id"] for msg in new_messages])
+            logging.info(f"New messages fetched: {len(new_messages)}")
+            return jsonify(new_messages)
+        else:
+            logging.warning("No new messages found.")
+            return jsonify({"error": "No new messages found"}), 404
+    except Exception as e:
+        logging.exception("Failed to fetch latest messages")
+        return jsonify({"error": str(e)}), 500
+
 def process_message():
     data = request.json
     user_message = data.get("text")
@@ -1309,79 +1161,5 @@ def process_message():
 
     return jsonify({"text": response_text})
 
-# Assuming initiate_and_send_data and other functions are defined here
-def initiate_and_send_data():
-    create_thread()  # Start the assistant by creating a new thread with the OpenAI's 'Assistants' API
-    for i in range(10, 0, -1):  # Countdown from 5 to 1
-        conversation_text.config(state='normal')
-        conversation_text.insert(tk.END, f"Sending Sheets Training Data in {i}...\n")
-        conversation_text.config(state='disabled')
-        root.update()  # Update the GUI to display the countdown
-        time.sleep(1)  # Wait for 1 second
-    retrieve_and_send_data()  # Fetch the latest training data from Google Sheets and send it to the OpenAI's 'Assistants' API for processing
 
-def process_commands(root):
-    try:
-        while True:
-            command, args = command_queue.get_nowait()
-            if command == "start_assistant":
-                initiate_and_send_data()
-            # Add more commands as needed
-    except queue.Empty:
-        pass
-    finally:
-        root.after(100, process_commands, root)
 
-if __name__ == "__main__":
-    flask_thread = threading.Thread(target=flask_thread_function)
-    flask_thread.start()
-    root = ctk.CTk()
-    root.title("Chat with Jira Auto Bot")
-    root.resizable(True, True)
-
-    # Set the appearance mode and color theme
-    ctk.set_appearance_mode("dark")  # or "dark"
-    ctk.set_default_color_theme("blue")  # or any other color
-
-    # Configure grid for dynamic resizing
-    root.grid_rowconfigure(1, weight=1)
-    root.grid_columnconfigure(0, weight=1)
-
-    conversation_text = scrolledtext.ScrolledText(root, state='disabled', height=30, width=100, font=("Roboto", 16), wrap=tk.WORD, padx=50, pady=10, bg=root.cget('bg'), borderwidth=0, highlightthickness=0, spacing3=0.5)
-    conversation_text.grid(row=0, column=0, columnspan=2, padx=50)
-
-    # Message Entry with 50 pixels of indent space on either side
-    conversation_text = create_scrolled_text(root)
-    # Message Entry with 50 pixels of indent space on either side
-    # Replace the single-line entry with the multiline message entry
-    message_entry = create_message_entry(root)
-
-    # Send Button - This button sends the user's message to the OpenAI's 'Assistants' API and displays the assistant's response in the conversation text area.
-    send_button = ctk.CTkButton(root, text="Send", command=send_message)
-    send_button.grid(row=1, column=1, padx=60, pady=10)
-
-    # Combined Button - This button starts the assistant and informs the user that the sheets training data is going to be sent with a countdown.
-    combined_button = ctk.CTkButton(root, text="Start Assistant & Send Training Data", command=initiate_and_send_data)
-    combined_button.grid(row=2, column=0, padx=60, pady=10)
-
-    auth_button = ctk.CTkButton(root, text="Start OAuth for Sheets API", command=lambda: threading.Thread(target=start_oauth_and_server).start())
-    auth_button.grid(row=4, column=0, padx=60, pady=10)
-
-    # OAuth Button for Jira API - This button initiates the OAuth flow for Jira API, allowing the user to authenticate and authorize the application to access their Jira data.
-    btn_oauth = ctk.CTkButton(root, text="Start OAuth for Jira API", command=start_oauth_flow)
-    btn_oauth.grid(row=5, column=0, padx=60, pady=10)
-
-    # Step 1: Add a Status Display Field at the bottom of the GUI
-    status_label = ctk.CTkLabel(root, text="Status: Initializing...", anchor="w")
-    status_label.grid(row=6, column=0, columnspan=2, padx=60, pady=10, sticky="ew")
-
-    def update_status_message(message):
-        """
-        Updates the status message display in a thread-safe manner.
-        """
-        def _update():
-            status_label.configure(text=f"Status: {message}")
-        root.after(0, _update)
-
-    # Your existing Tkinter GUI code goes here
-    root.mainloop()

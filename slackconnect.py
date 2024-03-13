@@ -1,88 +1,122 @@
 from flask import Flask, request, jsonify
-from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
-from slack_sdk.signature import SignatureVerifier
 import os
 import requests
+import time
+from dotenv import load_dotenv
+import hashlib
+import hmac
 import json
+from flask import Flask
+from oauthoption import oauth_bp  
+
+load_dotenv()  # Load environment variables
+
+# Load Slack credentials
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
+SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET")
 
 app = Flask(__name__)
+# Register the Blueprint with the app
+app.register_blueprint(oauth_bp, url_prefix='/oauth')
 
-# Initialize a Web client with your OAuth token
-slack_token = os.environ["SLACK_BOT_TOKEN"]
-client = WebClient(token=slack_token)
+# Assuming the environment variables are set for the URLs of the oauthoption.py endpoints
+OAUTH_JIRA_URL = os.getenv("OAUTH_JIRA_URL", "http://localhost:5001/start-oauth-jira")
+OAUTH_SHEETS_URL = os.getenv("OAUTH_SHEETS_URL", "http://localhost:5001/start-oauth-sheets")
+PROCESS_MESSAGE_URL = os.getenv("PROCESS_MESSAGE_URL", "http://localhost:5001/process-message")
+START_ASSISTANT_URL = os.getenv("START_ASSISTANT_URL", "http://localhost:5001/start-assistant")
+GET_LATEST_MESSAGES_URL = "http://localhost:5001/get-latest-messages"
 
-signature_verifier = SignatureVerifier(os.environ["SLACK_SIGNING_SECRET"])
+def verify_slack_request(request):
+    request_body = request.get_data().decode('utf-8')
+    timestamp = request.headers.get('X-Slack-Request-Timestamp')
+    
+    if abs(time.time() - int(timestamp)) > 60 * 5:
+        return False
+    
+    sig_basestring = f"v0:{timestamp}:{request_body}"
+    my_signature = 'v0=' + hmac.new(
+        bytes(SLACK_SIGNING_SECRET, 'utf-8'),
+        bytes(sig_basestring, 'utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    
+    slack_signature = request.headers.get('X-Slack-Signature')
+    
+    return hmac.compare_digest(my_signature, slack_signature)
 
-@app.route("/slack/interactions", methods=["POST"])
+@app.route('/slack/interactions', methods=['POST'])
 def slack_interactions():
-    if not signature_verifier.is_valid_request(request.get_data(), request.headers):
-        return "Invalid request", 400
+    payload = json.loads(request.form["payload"])
+    action_id = payload["actions"][0]["action_id"]
 
-    payload = request.form.get("payload")
-    if payload:
-        payload = json.loads(payload)
-        action_id = payload["actions"][0]["action_id"]
+    if action_id == "action_jira_oauth":
+        # Redirect user to Jira OAuth URL
+        oauth_url = OAUTH_JIRA_URL
+    elif action_id == "action_sheets_oauth":
+        # Redirect user to Google Sheets OAuth URL
+        oauth_url = OAUTH_SHEETS_URL
+    else:
+        return jsonify({"error": "Unknown action"}), 400
 
-        if action_id == "oauth_jira_setup":
-            # Trigger OAuth flow for Jira
-            pass  # Implement the logic here
-        elif action_id == "oauth_sheets_setup":
-            # Trigger OAuth flow for Sheets
-            pass  # Implement the logic here
-
-    return jsonify({"status": "ok"})
+    # Respond with a message directing the user to initiate OAuth in their browser
+    response_message = {
+        "text": f"Please click the link to authorize: {oauth_url}",
+        "replace_original": "true"
+    }
+    return jsonify(response_message)
 
 @app.route("/slack/events", methods=["POST"])
 def slack_events():
-    # Extract the request's JSON body
+    if not verify_slack_request(request):
+        return jsonify({"error": "Verification failed"}), 403
+
     slack_event = request.json
-    
-    # Verify the request came from Slack
-    if "challenge" in slack_event:
+
+    if slack_event.get("type") == "url_verification":
         return jsonify({"challenge": slack_event["challenge"]})
-    
-    # Handle the event (this is where you'll add your logic)
-    if "event" in slack_event:
-        event = slack_event["event"]
-        
-        # Check if the event is a message without a subtype
-        if event["type"] == "message" and "subtype" not in event:
-            channel_id = event["channel"]
-            user_message = event["text"]
-            lower_message = user_message.lower()
 
-            # Respond to a message event
-            try:
-                response = client.chat_postMessage(
-                    channel=channel_id,
-                    text=f"Received your message: {user_message}"
-                )
-            except SlackApiError as e:
-                print(f"Error sending message: {e}")
+    if slack_event.get("type") == "event_callback":
+        event = slack_event.get("event", {})
 
-            # Start assistant or trigger OAuth flow based on the message
-            if "start assistant" in lower_message:
-                response = requests.post("http://localhost:5001/start-assistant")
-                message = "Assistant started and training data sent." if response.status_code == 200 else "Failed to start assistant."
-            elif "start oauth jira" in lower_message:
-                response = requests.get("http://localhost:5001/start-oauth-jira")
-                message = "Jira OAuth initiated." if response.status_code == 200 else "Failed to initiate Jira OAuth."
-            elif "start oauth sheets" in lower_message:
-                response = requests.get("http://localhost:5001/start-oauth-sheets")
-                message = "Sheets OAuth initiated." if response.status_code == 200 else "Failed to initiate Sheets OAuth."
-            else:
-                # Send the message to oauthoption.py for processing
-                response = requests.post("http://localhost:5001/process-message", json={"text": user_message})
-                message = response.json().get("response") if response.status_code == 200 else "Failed to process message."
-            
-            # Send the response back to the Slack channel
-            try:
-                client.chat_postMessage(channel=channel_id, text=message)
-            except SlackApiError as e:
-                print(f"Error sending message: {e}")
-        
-        return jsonify({"status": "ok"})
+        if event.get("type") == "message" and not event.get("bot_id"):  # Ignore bot messages
+            channel_id = event.get("channel")
+            user_message = event.get("text", "").lower()
+
+            if "start assistant" in user_message:
+                # Trigger the assistant start
+                start_response = requests.post(START_ASSISTANT_URL, json={"text": user_message}, timeout=5)
+                # Assuming the assistant immediately sends a response which we fetch
+                time.sleep(3)  # Adjust the delay as needed
+                messages_response = requests.get(GET_LATEST_MESSAGES_URL)
+                latest_messages = messages_response.json()
+                latest_assistant_message = next((msg for msg in latest_messages if msg["role"] == "assistant"), None)
+                if latest_assistant_message:
+                    send_message_to_slack(channel_id, latest_assistant_message.get("text", "No message found."))
+                else:
+                    send_message_to_slack(channel_id, "Failed to get a response from the assistant.")
+            else:                
+                requests.post(PROCESS_MESSAGE_URL, json={"text": user_message})
+                # Assuming the assistant immediately sends a response which we fetch
+                time.sleep(3)  # Adjust the delay as needed
+                messages_response = requests.get(GET_LATEST_MESSAGES_URL)
+                latest_messages = messages_response.json()
+                latest_assistant_message = next((msg for msg in latest_messages if msg["role"] == "assistant"), None)
+                if latest_assistant_message:
+                    send_message_to_slack(channel_id, latest_assistant_message.get("text", "No message found."))
+                else:
+                    send_message_to_slack(channel_id, "Failed to get a response from the assistant.")
+        return jsonify({"status": "Event received"}), 200
+
+def send_message_to_slack(channel_id, text):
+    url = "https://slack.com/api/chat.postMessage"
+    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
+    payload = {
+        "channel": channel_id,
+        "text": text
+    }
+    response = requests.post(url, headers=headers, json=payload)
+    if not response.ok:
+        print(f"Error sending message to Slack: {response.text}")
 
 if __name__ == "__main__":
-    app.run(debug=True, port=3000)
+    app.run(port=3000, debug=True)
