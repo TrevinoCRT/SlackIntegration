@@ -20,11 +20,11 @@ app = Flask(__name__)
 app.register_blueprint(oauth_bp, url_prefix='/oauth')
 
 # Assuming the environment variables are set for the URLs of the oauthoption.py endpoints
-OAUTH_JIRA_URL = os.getenv("OAUTH_JIRA_URL", "http://localhost:5001/start-oauth-jira")
-OAUTH_SHEETS_URL = os.getenv("OAUTH_SHEETS_URL", "http://localhost:5001/start-oauth-sheets")
-PROCESS_MESSAGE_URL = os.getenv("PROCESS_MESSAGE_URL", "http://localhost:5001/process-message")
-START_ASSISTANT_URL = os.getenv("START_ASSISTANT_URL", "http://localhost:5001/start-assistant")
-GET_LATEST_MESSAGES_URL = "http://localhost:5001/get-latest-messages"
+OAUTH_JIRA_URL = os.getenv("OAUTH_JIRA_URL", "http://localhost:3000/start-oauth-jira")
+OAUTH_SHEETS_URL = os.getenv("OAUTH_SHEETS_URL", "http://localhost:3000/start-oauth-sheets")
+PROCESS_MESSAGE_URL = os.getenv("PROCESS_MESSAGE_URL", "http://localhost:3000/process-message")
+START_ASSISTANT_URL = os.getenv("START_ASSISTANT_URL", "http://localhost:3000/start-assistant")
+GET_LATEST_MESSAGES_URL = "http://localhost:3000/get-latest-messages"
 
 def verify_slack_request(request):
     request_body = request.get_data().decode('utf-8')
