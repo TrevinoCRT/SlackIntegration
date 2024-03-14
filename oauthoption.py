@@ -738,22 +738,35 @@ def get_messages(thread_id, limit=100, order="asc", after=None, before=None):
         "before": before
     }
 
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code == 200:
-        new_messages = response.json()
-        print(f"Successfully fetched messages. Response size: {len(str(new_messages))} characters")
-        
-        cached_messages = load_messages_from_cache(thread_id) or {"data": []}
-        all_messages = cached_messages.get("data", []) + new_messages.get("data", [])
-        unique_messages = {msg['id']: msg for msg in all_messages}.values()
-        
-        save_messages_to_cache(thread_id, {"data": list(unique_messages)})
-        
-        return {"data": list(unique_messages)}
-    else:
-        error_message = {"error": f"Error fetching messages: {response.status_code} - {response.text[:100]}", "status_code": response.status_code}
-        print(error_message['error'])
-        return error_message
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            try:
+                new_messages = response.json()
+            except json.JSONDecodeError:
+                logging.error("Failed to decode JSON. Attempting to fetch messages using a fallback method.")
+                # Fallback method or retry logic here
+                # For example, you might want to log this error and return a default response
+                # or attempt to parse the response text manually if it's expected to be simple JSON
+                return {"data": [], "error": "Failed to decode JSON, used fallback."}
+
+            print(f"Successfully fetched messages. Response size: {len(str(new_messages))} characters")
+            
+            cached_messages = load_messages_from_cache(thread_id) or {"data": []}
+            all_messages = cached_messages.get("data", []) + new_messages.get("data", [])
+            unique_messages = {msg['id']: msg for msg in all_messages}.values()
+            
+            save_messages_to_cache(thread_id, {"data": list(unique_messages)})
+            
+            return {"data": list(unique_messages)}
+        else:
+            error_message = {"error": f"Error fetching messages: {response.status_code} - {response.text[:100]}", "status_code": response.status_code}
+            print(error_message['error'])
+            return error_message
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request to fetch messages failed: {e}")
+        # Handle request errors (e.g., network issues) here
+        return {"data": [], "error": "Request failed, used fallback."}
 
 def save_last_message_id_to_cache(thread_id, last_message_id):
     cache_file = f"last_message_id_cache_{thread_id}.json"
@@ -1096,15 +1109,24 @@ def sheets_oauth_callback():
     
 def initiate_and_send_data_with_delay(channel_id, slack_bot_token, displayed_message_ids):
     create_thread()  # Assuming this function initializes a thread and sets `thread_id`
-    time.sleep(3)  # Wait for 3 seconds
     # Now passing the required arguments
     retrieve_and_send_data(channel_id, slack_bot_token, displayed_message_ids)
 
 @oauth_bp.route('/start-assistant', methods=['POST'])
 def start_assistant():
-    threading.Thread(target=initiate_and_send_data_with_delay, daemon=True).start()
-    return jsonify({"status": "Assistant start command received, initiating in 3 seconds"})
+    # Extract required data from the request's JSON payload
+    data = request.get_json()
+    channel_id = data.get('channel_id')
+    slack_bot_token = data.get('slack_bot_token')
+    displayed_message_ids = data.get('displayed_message_ids')
 
+    # Check if all required arguments are provided
+    if not all([channel_id, slack_bot_token, displayed_message_ids]):
+        return jsonify({"error": "Missing required parameters"}), 400
+
+    # Start the thread with the extracted arguments
+    threading.Thread(target=initiate_and_send_data_with_delay, args=(channel_id, slack_bot_token, displayed_message_ids), daemon=True).start()
+    return jsonify({"status": "Assistant start command received, initiating in 3 seconds"})
 
 def wait_for_run_completion(thread_id, run_id, max_wait_time=60):
     logging.info(f"Starting to wait for run completion. Thread ID: {thread_id}, Run ID: {run_id}")
@@ -1130,6 +1152,7 @@ def wait_for_run_completion(thread_id, run_id, max_wait_time=60):
 
     return False
 
+@oauth_bp.route('/get-latest-messages', methods=['GET'])
 def get_latest_messages():
     global thread_id, displayed_message_ids, last_run_id
 
@@ -1154,7 +1177,7 @@ def get_latest_messages():
         logging.exception("Failed to fetch latest messages")
         return jsonify({"error": str(e)}), 500
 
-
+@oauth_bp.route('/process-message', methods=['POST'])
 def process_message():
     """
     Endpoint to process incoming messages.

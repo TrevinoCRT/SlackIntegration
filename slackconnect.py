@@ -34,7 +34,8 @@ OAUTH_JIRA_URL = os.getenv("OAUTH_JIRA_URL", "https://jiraslackgpt-592ed3dfdc03.
 OAUTH_SHEETS_URL = os.getenv("OAUTH_SHEETS_URL", "https://jiraslackgpt-592ed3dfdc03.herokuapp.com/start-oauth-sheets")
 PROCESS_MESSAGE_URL = os.getenv("PROCESS_MESSAGE_URL", "https://jiraslackgpt-592ed3dfdc03.herokuapp.com/process-message")
 START_ASSISTANT_URL = os.getenv("START_ASSISTANT_URL", "https://jiraslackgpt-592ed3dfdc03.herokuapp.com/start-assistant")
-GET_LATEST_MESSAGES_URL = "https://jiraslackgpt-592ed3dfdc03.herokuapp.com/get-latest-messages"
+GET_LATEST_MESSAGES_URL = os.getenv("GET_LATEST_MESSAGES_URL", "https://jiraslackgpt-592ed3dfdc03.herokuapp.com/get-latest-messages")
+PROCESS_MESSAGE_URL = os.getenv("PROCESS_MESSAGE_URL", "https://jiraslackgpt-592ed3dfdc03.herokuapp.com/process-message")
 
 def verify_slack_request(request):
     request_body = request.get_data().decode('utf-8')
