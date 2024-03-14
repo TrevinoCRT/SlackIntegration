@@ -55,7 +55,7 @@ GET_LATEST_MESSAGES_URL = os.getenv("GET_LATEST_MESSAGES_URL")
 START_ASSISTANT_URL = os.getenv("START_ASSISTANT_URL")
 
 # Update the AUTHORIZATION_URL to use the environment variables
-AUTHORIZATION_URL = f'https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id={CLIENT_ID}&scope={SCOPES}&redirect_uri={REDIRECT_URI}&state={generate_state_parameter()}&response_type=code&prompt=consent'
+AUTHORIZATION_URL = f'https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id={CLIENT_ID}&scope={JIRA_SCOPES}&redirect_uri={REDIRECT_URI}&state={generate_state_parameter()}&response_type=code&prompt=consent'
 
 # Update for Google Sheets API
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
