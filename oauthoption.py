@@ -1056,7 +1056,7 @@ def start_oauth_sheets():
         client_secrets = json.loads(client_secrets_json)
 
         # Initialize OAuth flow with client secrets and scopes
-        flow = Flow.from_client_config(client_secrets, JIRA_SCOPES)
+        flow = Flow.from_client_config(client_secrets, GOOGLE_SCOPES)
         flow.redirect_uri = 'https://jiraslackgpt-592ed3dfdc03.herokuapp.com/sheets-callback'
 
         # Generate the authorization URL
