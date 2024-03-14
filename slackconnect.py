@@ -162,6 +162,8 @@ def slack_interactions():
         logging.error(f"Error handling Slack interaction: {e}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
 
+
+
 @app.route("/slack/events", methods=["POST"])
 def slack_events():
     logging.info("Received Slack event.")

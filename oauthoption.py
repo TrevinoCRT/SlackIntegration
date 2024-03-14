@@ -121,7 +121,7 @@ def edit_spreadsheet(spreadsheet_id, range_name, value_input_option, value_range
         print(f"An error occurred: {error}")
         response = None
 
-def retrieve_and_send_data():
+def retrieve_and_send_data(channel_id, slack_bot_token, displayed_message_ids):
     global thread_id
 
     if not thread_id:
@@ -153,7 +153,7 @@ def retrieve_and_send_data():
             return
         print(f"[INFO] Run thread initiated. Run ID: {run_id[:10]}... (truncated for log)")
 
-        check_and_display_new_messages(run_id)
+        check_and_display_new_messages(run_id, channel_id, slack_bot_token, displayed_message_ids)
 
     except Exception as e:
         print(f"[ERROR] Error updating training data: {str(e)[:100]}... (truncated for log)")
@@ -1153,30 +1153,40 @@ def get_latest_messages():
         logging.exception("Failed to fetch latest messages")
         return jsonify({"error": str(e)}), 500
 
+
 def process_message():
-    data = request.json
-    user_message = data.get("text")
-
-    if not thread_id:
-        return jsonify({"text": "[ERROR] Thread not initialized. Unable to process message."})
-
-    # Send the user's message to the thread
-    add_message_to_thread(thread_id, "user", user_message)
-    print(f"[INFO] Message processed. Message (truncated to 100 chars): {user_message[:100]}")
-
+    """
+    Endpoint to process incoming messages.
+    """
     try:
+        data = request.get_json()  # Use get_json() to parse the JSON data
+        user_message = data.get("text", "")
+
+        if not user_message:
+            return jsonify({"text": "[ERROR] No message provided."}), 400
+
+        if not thread_id:
+            return jsonify({"text": "[ERROR] Thread not initialized. Unable to process message."}), 400
+
+        # Send the user's message to the thread
+        # Assuming add_message_to_thread is a function that adds a message to a thread
+        # and run_thread initiates processing of the thread
+        add_message_to_thread(thread_id, "user", user_message)
+        logging.info(f"[INFO] Message processed. Message (truncated to 100 chars): {user_message[:100]}")
+
         # Call run_thread to process the user message
         run_status_response = run_thread(thread_id, ASSISTANT_ID)
         run_id = run_status_response.get("id")  # Extract the run ID from the response
-        print(f"[INFO] Run thread initiated. Run ID: {run_id}")
+        logging.info(f"[INFO] Run thread initiated. Run ID: {run_id}")
 
         # Handle the run status in a separate function
+        # Assuming handle_run_status is a function that handles the run status
         response_text = handle_run_status(thread_id, run_id)
-    except Exception as e:
-        response_text = f"[ERROR] An error occurred while processing message. Error: {str(e)[:100]}"  # Truncate error message
-        print(response_text)
+        return jsonify({"text": response_text})
 
-    return jsonify({"text": response_text})
+    except Exception as e:
+        logging.exception("Failed to process message")
+        return jsonify({"text": f"[ERROR] An error occurred while processing message. Error: {str(e)[:100]}"}), 500
 
 
 
