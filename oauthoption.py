@@ -72,43 +72,7 @@ displayed_message_ids = set()  # Keep track of displayed message IDs
 # Declare `flow` as a global variable
 global flow
 
-def start_oauth_and_server():
-    global flow  # Indicate that we are using the global `flow` variable
 
-    # Decode the client secrets from an environment variable
-    client_secrets_json = base64.b64decode(os.getenv("GOOGLE_CLIENT_SECRET_BASE64")).decode('utf-8')
-    client_secrets = json.loads(client_secrets_json)
-
-    # Initialize OAuth flow with client secrets and scopes
-    flow = Flow.from_client_config(client_secrets, SCOPES)
-    flow.redirect_uri = 'https://jiraslackgpt-592ed3dfdc03.herokuapp.com/sheets-callback'
-
-    # Open the authorization URL in the user's browser
-    auth_url, _ = flow.authorization_url(prompt='consent')
-    webbrowser.open(auth_url)
-
-    # Start a local server to listen for the authorization response
-    class OAuthHandler(SimpleHTTPRequestHandler):
-        def do_GET(self):
-            global flow  # Use the global `flow` variable
-
-            # Parse the authorization response URL
-            self.send_response(200)
-            self.end_headers()
-            query = urlparse(self.path).query
-            auth_response = dict(parse_qs(query))
-            flow.fetch_token(authorization_response=self.path)
-
-            # Store the credentials
-            creds = flow.credentials
-            save_credentials(creds)
-
-            self.wfile.write(b'Authorization successful. You may close this window.')
-
-    # Start the server
-    with socketserver.TCPServer(("", 8081), OAuthHandler) as httpd:
-        print("Serving at port", 8081)
-        httpd.handle_request()
 # Function to save Google Sheets API credentials to a file
 def save_credentials(credentials):
     directory = os.path.dirname(os.path.realpath(__file__))
@@ -1100,9 +1064,21 @@ def jira_oauth_callback():
 def start_oauth_sheets():
     logging.info("Initiating Google Sheets OAuth flow.")
     try:
-        start_oauth_and_server()  # Function to initiate Google Sheets OAuth flow
-        logging.info("Google Sheets OAuth flow initiated successfully.")
-        return jsonify({"status": "Google Sheets OAuth flow initiated. Check your browser."})
+        global flow  # Indicate that we are using the global `flow` variable
+
+        # Decode the client secrets from an environment variable
+        client_secrets_json = base64.b64decode(os.getenv("GOOGLE_CLIENT_SECRET_BASE64")).decode('utf-8')
+        client_secrets = json.loads(client_secrets_json)
+
+        # Initialize OAuth flow with client secrets and scopes
+        flow = Flow.from_client_config(client_secrets, SCOPES)
+        flow.redirect_uri = 'https://jiraslackgpt-592ed3dfdc03.herokuapp.com/sheets-callback'
+
+        # Generate the authorization URL
+        auth_url, _ = flow.authorization_url(prompt='consent')
+
+        # Redirect the user to the authorization URL
+        return redirect(auth_url)
     except Exception as e:
         logging.error(f"Failed to initiate Google Sheets OAuth flow: {e}", exc_info=True)
         return jsonify({"status": "Failed to initiate Google Sheets OAuth flow", "error": str(e)})
