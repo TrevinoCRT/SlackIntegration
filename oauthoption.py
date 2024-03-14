@@ -44,7 +44,7 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 TOKEN_URL = os.getenv("TOKEN_URL")
 # For SCOPES, since it's a space-separated list, ensure it's properly formatted if needed
-SCOPES = os.getenv("SCOPES", "read:jira-work write:jira-work manage:jira-project manage:jira-webhook manage:jira-configuration read:me read:account")
+JIRA_SCOPES = os.getenv("JIRA_SCOPES", "read:jira-work write:jira-work manage:jira-project manage:jira-webhook manage:jira-configuration read:me read:account")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
 # URLs for OAuth and message processing
@@ -58,7 +58,7 @@ START_ASSISTANT_URL = os.getenv("START_ASSISTANT_URL")
 AUTHORIZATION_URL = f'https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id={CLIENT_ID}&scope={SCOPES}&redirect_uri={REDIRECT_URI}&state={generate_state_parameter()}&response_type=code&prompt=consent'
 
 # Update for Google Sheets API
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 API_SERVICE_NAME = 'sheets'
 API_VERSION = 'v4'
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -1010,10 +1010,11 @@ oauth_bp = Blueprint('oauth_bp', __name__)
 def start_oauth_jira():
     logging.info("Initiating Jira OAuth flow.")
     try:
-        # Generate the state parameter for CSRF protection
-        state = generate_state_parameter()
-        # Construct the authorization URL
-        authorization_url = f'https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id={CLIENT_ID}&scope={urllib.parse.quote(SCOPES)}&redirect_uri={urllib.parse.quote(REDIRECT_URI)}&state={state}&response_type=code&prompt=consent'
+        # Ensure JIRA_SCOPES is a space-separated string of scopes
+        scopes_string = " ".join(JIRA_SCOPES) if isinstance(JIRA_SCOPES, list) else JIRA_SCOPES
+
+        # Generate the authorization URL using scopes_string
+        authorization_url = f'https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id={CLIENT_ID}&scope={urllib.parse.quote(scopes_string)}&redirect_uri={urllib.parse.quote(REDIRECT_URI)}&state={generate_state_parameter()}&response_type=code&prompt=consent'
         
         # Redirect the user to the authorization URL
         return redirect(authorization_url)
@@ -1055,7 +1056,7 @@ def start_oauth_sheets():
         client_secrets = json.loads(client_secrets_json)
 
         # Initialize OAuth flow with client secrets and scopes
-        flow = Flow.from_client_config(client_secrets, SCOPES)
+        flow = Flow.from_client_config(client_secrets, JIRA_SCOPES)
         flow.redirect_uri = 'https://jiraslackgpt-592ed3dfdc03.herokuapp.com/sheets-callback'
 
         # Generate the authorization URL
