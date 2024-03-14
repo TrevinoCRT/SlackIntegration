@@ -120,14 +120,18 @@ block_kit_payload = {
 def send_app_home_ui(user_id):
     """Sends the Block Kit UI to the App Home of a specified user."""
     url = "https://slack.com/api/views.publish"
-    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
+    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"}
     payload = {
         "user_id": user_id,
-        "view": block_kit_payload
+        "view": json.dumps(block_kit_payload)  # Ensure the view payload is JSON-encoded
     }
     response = requests.post(url, headers=headers, json=payload)
     if not response.ok:
         logging.error(f"Error sending Block Kit UI to App Home: {response.text}")
+    else:
+        logging.info(f"Successfully sent Block Kit UI to App Home: {response.json()}")
+        # Log the response body for debugging
+        print(response.json())
 
 
 @app.route('/slack/interactions', methods=['POST'])
