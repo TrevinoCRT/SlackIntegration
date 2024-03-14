@@ -18,9 +18,7 @@ SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET")
 
 app = Flask(__name__)
 # Register the Blueprint with the app
-app.register_blueprint(oauth_bp, url_prefix='/oauth')
-
-app = Flask(__name__)
+app.register_blueprint(oauth_bp) 
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
