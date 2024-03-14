@@ -69,14 +69,19 @@ displayed_message_ids = set()  # Keep track of displayed message IDs
 # OAuth and Google Sheets Integration
 # Function to start the OAuth process and server for Google Sheets API
 # Inside your existing function or setup
+# Declare `flow` as a global variable
+global flow
+
 def start_oauth_and_server():
+    global flow  # Indicate that we are using the global `flow` variable
+
     # Decode the client secrets from an environment variable
     client_secrets_json = base64.b64decode(os.getenv("GOOGLE_CLIENT_SECRET_BASE64")).decode('utf-8')
     client_secrets = json.loads(client_secrets_json)
 
     # Initialize OAuth flow with client secrets and scopes
     flow = Flow.from_client_config(client_secrets, SCOPES)
-    flow.redirect_uri = 'https://jiraslackgpt-592ed3dfdc03.herokuapp.com/start-oauth-sheets'
+    flow.redirect_uri = 'https://jiraslackgpt-592ed3dfdc03.herokuapp.com/sheets-callback'
 
     # Open the authorization URL in the user's browser
     auth_url, _ = flow.authorization_url(prompt='consent')
@@ -85,6 +90,8 @@ def start_oauth_and_server():
     # Start a local server to listen for the authorization response
     class OAuthHandler(SimpleHTTPRequestHandler):
         def do_GET(self):
+            global flow  # Use the global `flow` variable
+
             # Parse the authorization response URL
             self.send_response(200)
             self.end_headers()
@@ -100,6 +107,7 @@ def start_oauth_and_server():
 
     # Start the server
     with socketserver.TCPServer(("", 8081), OAuthHandler) as httpd:
+        print("Serving at port", 8081)
         httpd.handle_request()
 # Function to save Google Sheets API credentials to a file
 def save_credentials(credentials):
@@ -1065,53 +1073,60 @@ oauth_bp = Blueprint('oauth_bp', __name__)
 
 @oauth_bp.route('/start-oauth-jira', methods=['GET'])
 def start_oauth_jira():
+    logging.info("Initiating Jira OAuth flow.")
     try:
-        start_oauth_flow()  # Function to initiate Jira OAuth flow
+        start_oauth_flow()
+        logging.info("Jira OAuth flow initiated successfully.")
         return jsonify({"status": "Jira OAuth flow initiated. Check your browser."})
     except Exception as e:
+        logging.error(f"Failed to initiate Jira OAuth flow: {e}", exc_info=True)
         return jsonify({"status": "Failed to initiate Jira OAuth flow", "error": str(e)})
 
 @oauth_bp.route('/jira-callback', methods=['GET'])
 def jira_oauth_callback():
+    logging.info("Received Jira OAuth callback request.")
     code = request.args.get('code')
     if code:
+        logging.info("Jira OAuth code received, exchanging for token.")
         # Exchange the code for a token
         exchange_code_for_token(code)
+        logging.info("Jira OAuth token exchange successful.")
         return "Authorization successful. You may close this window."
     else:
+        logging.warning("Jira OAuth callback received without code.")
         return "Authorization failed."
 
 @oauth_bp.route('/start-oauth-sheets', methods=['GET'])
 def start_oauth_sheets():
+    logging.info("Initiating Google Sheets OAuth flow.")
     try:
         start_oauth_and_server()  # Function to initiate Google Sheets OAuth flow
+        logging.info("Google Sheets OAuth flow initiated successfully.")
         return jsonify({"status": "Google Sheets OAuth flow initiated. Check your browser."})
     except Exception as e:
+        logging.error(f"Failed to initiate Google Sheets OAuth flow: {e}", exc_info=True)
         return jsonify({"status": "Failed to initiate Google Sheets OAuth flow", "error": str(e)})
 
 @oauth_bp.route('/sheets-callback', methods=['GET'])
 def sheets_oauth_callback():
-    # Assuming `flow` is globally accessible or retrievable in this context,
-    # which might require you to adjust how `flow` is instantiated and stored.
-    # One approach is to store `flow` in the Flask app's context or a session.
-    
-    # This example assumes `flow` is accessible as a global variable or similar.
     global flow
+    logging.info("Received Google Sheets OAuth callback request.")
     
     if 'code' not in request.args:
+        logging.warning("Google Sheets OAuth callback received without code.")
         # No code in query string, so OAuth flow was not completed.
         return "Authorization failed or was cancelled by the user.", 400
 
     # Fetch the authorization code from the query string
     authorization_response = request.url
     try:
+        logging.info("Google Sheets OAuth code received, fetching token.")
         # Use the authorization code to fetch the token
         flow.fetch_token(authorization_response=authorization_response)
-
         # Store the credentials
         creds = flow.credentials
         save_credentials(creds)
-
+        logging.info("Google Sheets OAuth token fetched and credentials saved successfully.")
         # Redirect or respond that the authorization was successful
         return "Authorization successful. You may close this window."
     except Exception as e:

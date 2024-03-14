@@ -8,6 +8,7 @@ import hmac
 import json
 from flask import Flask
 from oauthoption import oauth_bp 
+import logging
 
 load_dotenv()  # Load environment variables
 
@@ -18,6 +19,17 @@ SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET")
 app = Flask(__name__)
 # Register the Blueprint with the app
 app.register_blueprint(oauth_bp, url_prefix='/oauth')
+
+app = Flask(__name__)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+logger = logging.getLogger()
+
+# Ensure that the Flask app's logger uses the same configuration
+app.logger.handlers = logger.handlers
+app.logger.setLevel(logger.level)
+
 
 # Assuming the environment variables are set for the URLs of the oauthoption.py endpoints
 OAUTH_JIRA_URL = os.getenv("OAUTH_JIRA_URL", "http://localhost:3000/start-oauth-jira")
@@ -126,46 +138,57 @@ def send_welcome_message(channel_id):
     if not response.ok:
         print(f"Error sending welcome message to Slack: {response.text}")
 
-
 @app.route('/slack/interactions', methods=['POST'])
 def slack_interactions():
-    payload = json.loads(request.form["payload"])
-    action_id = payload["actions"][0]["action_id"]
+    logging.info("Received Slack interaction.")
+    try:
+        payload = json.loads(request.form["payload"])
+        action_id = payload["actions"][0]["action_id"]
+        logging.info(f"Action ID: {action_id}")
 
-    if action_id == "action_jira_oauth":
-        # Redirect user to Jira OAuth URL
-        oauth_url = OAUTH_JIRA_URL
-    elif action_id == "action_sheets_oauth":
-        # Redirect user to Google Sheets OAuth URL
-        oauth_url = OAUTH_SHEETS_URL
-    else:
-        return jsonify({"error": "Unknown action"}), 400
+        if action_id == "action_jira_oauth":
+            oauth_url = OAUTH_JIRA_URL
+        elif action_id == "action_sheets_oauth":
+            oauth_url = OAUTH_SHEETS_URL
+        else:
+            logging.warning(f"Unknown action: {action_id}")
+            return jsonify({"error": "Unknown action"}), 400
 
-    # Respond with a message directing the user to initiate OAuth in their browser
-    response_message = {
-        "text": f"Please click the link to authorize: {oauth_url}",
-        "replace_original": "true"
-    }
-    return jsonify(response_message)
+        logging.info(f"Directing user to OAuth URL: {oauth_url}")
+        response_message = {
+            "text": f"Please click the link to authorize: {oauth_url}",
+            "replace_original": "true"
+        }
+        return jsonify(response_message)
+    except Exception as e:
+        logging.error(f"Error handling Slack interaction: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route("/slack/events", methods=["POST"])
 def slack_events():
+    logging.info("Received Slack event.")
     if not verify_slack_request(request):
+        logging.warning("Verification failed for Slack event.")
         return jsonify({"error": "Verification failed"}), 403
 
     slack_event = request.json
+    logging.info(f"Slack event type: {slack_event.get('type')}")
 
     if slack_event.get("type") == "url_verification":
+        logging.info("URL verification event received.")
         return jsonify({"challenge": slack_event["challenge"]})
 
     if slack_event.get("type") == "event_callback":
         event = slack_event.get("event", {})
+        logging.info(f"Event callback received. Event type: {event.get('type')}")
 
         if event.get("type") == "message" and not event.get("bot_id"):  # Ignore bot messages
             channel_id = event.get("channel")
             user_message = event.get("text", "").lower()
+            logging.info(f"Message received in channel {channel_id}: {user_message}")
 
             if "start assistant" in user_message:
+                logging.info("Starting assistant based on user message.")
                 # Trigger the assistant start
                 start_response = requests.post(START_ASSISTANT_URL, json={"text": user_message}, timeout=5)
                 # Assuming the assistant immediately sends a response which we fetch
@@ -178,6 +201,7 @@ def slack_events():
                 else:
                     send_message_to_slack(channel_id, "Failed to get a response from the assistant.")
             else:                
+                logging.info("Processing user message without starting assistant.")
                 requests.post(PROCESS_MESSAGE_URL, json={"text": user_message})
                 # Assuming the assistant immediately sends a response which we fetch
                 time.sleep(3)  # Adjust the delay as needed
