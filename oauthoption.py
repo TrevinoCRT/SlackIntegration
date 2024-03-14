@@ -63,6 +63,8 @@ API_SERVICE_NAME = 'sheets'
 API_VERSION = 'v4'
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
+global last_run_id
+last_run_id = None
 thread_id = None
 last_displayed_message_id = None
 displayed_message_ids = set()  # Keep track of displayed message IDs
@@ -501,7 +503,7 @@ def add_message_to_thread(thread_id, role, content, file_ids=None, metadata=None
         return {"status": "error", "message": str(e)}
 
 def run_thread(thread_id, assistant_id, model=None, instructions=None, additional_instructions=None, tools=None, metadata=None):
-    # Start a new run
+    global last_run_id
     url = f"https://api.openai.com/v1/threads/{thread_id}/runs"
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
@@ -585,6 +587,7 @@ def run_thread(thread_id, assistant_id, model=None, instructions=None, additiona
     }
     response = requests.post(url, headers=headers, json=payload)
     run_id = response.json().get('id')  # Get the run ID from the response
+    last_run_id = run_id  # Update the global last_run_id variable
     print(f"Run ID: {run_id}")  # Debug print statement
     return response.json()
 

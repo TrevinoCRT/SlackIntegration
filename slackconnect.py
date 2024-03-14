@@ -117,25 +117,18 @@ block_kit_payload = {
 }
 
 
-def send_welcome_message(channel_id):
-    """
-    Sends a welcome message to a specified Slack channel.
-    
-    Parameters:
-    - channel_id (str): The ID of the channel to send the message to.
-    """
-    url = "https://slack.com/api/chat.postMessage"
-    headers = {
-        "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
-        "Content-Type": "application/json"
-    }
+def send_app_home_ui(user_id):
+    """Sends the Block Kit UI to the App Home of a specified user."""
+    url = "https://slack.com/api/views.publish"
+    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
     payload = {
-        "channel": channel_id,
-        "blocks": block_kit_payload["blocks"]
+        "user_id": user_id,
+        "view": block_kit_payload
     }
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
+    response = requests.post(url, headers=headers, json=payload)
     if not response.ok:
-        print(f"Error sending welcome message to Slack: {response.text}")
+        logging.error(f"Error sending Block Kit UI to App Home: {response.text}")
+
 
 @app.route('/slack/interactions', methods=['POST'])
 def slack_interactions():
@@ -178,7 +171,12 @@ def slack_events():
     if slack_event.get("type") == "url_verification":
         logging.info("URL verification event received.")
         return jsonify({"challenge": slack_event["challenge"]})
-
+    
+    if slack_event.get('type') == 'app_home_opened':
+        user_id = slack_event.get('user')  # User ID who opened the App Home
+        send_app_home_ui(user_id)
+        return jsonify({"status": "App Home UI sent"}), 200
+    
     if slack_event.get("type") == "event_callback":
         event = slack_event.get("event", {})
         logging.info(f"Event callback received. Event type: {event.get('type')}")
@@ -190,25 +188,56 @@ def slack_events():
 
             if "start assistant" in user_message:
                 logging.info("Starting assistant based on user message.")
-                # Trigger the assistant start
+                # Ensure START_ASSISTANT_URL is correct and payload is as expected
                 start_response = requests.post(START_ASSISTANT_URL, json={"text": user_message}, timeout=5)
+                if start_response.status_code != 200:
+                    logging.error(f"Failed to start assistant: {start_response.text}")
+                    send_message_to_slack(channel_id, "Failed to start the assistant.")
+                    return jsonify({"status": "Assistant start failed"}), 200
+
                 # Assuming the assistant immediately sends a response which we fetch
                 time.sleep(3)  # Adjust the delay as needed
                 messages_response = requests.get(GET_LATEST_MESSAGES_URL)
-                latest_messages = messages_response.json()
-                latest_assistant_message = next((msg for msg in latest_messages if msg["role"] == "assistant"), None)
+                try:
+                    latest_messages = messages_response.json()
+                except json.JSONDecodeError:
+                    logging.error("Failed to decode JSON from latest messages response.")
+                    send_message_to_slack(channel_id, "Failed to decode latest messages.")
+                    return jsonify({"status": "JSON decode error"}), 200
+
+                latest_assistant_message = next((msg for msg in latest_messages if msg.get("role") == "assistant"), None)
                 if latest_assistant_message:
                     send_message_to_slack(channel_id, latest_assistant_message.get("text", "No message found."))
                 else:
                     send_message_to_slack(channel_id, "Failed to get a response from the assistant.")
-            else:                
+            else:               
                 logging.info("Processing user message without starting assistant.")
-                requests.post(PROCESS_MESSAGE_URL, json={"text": user_message})
+                process_message_response = requests.post(PROCESS_MESSAGE_URL, json={"text": user_message})
+                if process_message_response.status_code != 200:
+                    logging.error(f"Failed to process user message: {process_message_response.text}")
+                    send_message_to_slack(channel_id, "Failed to process your message.")
+                    return jsonify({"status": "Message processing failed"}), 200
+
                 # Assuming the assistant immediately sends a response which we fetch
                 time.sleep(3)  # Adjust the delay as needed
-                messages_response = requests.get(GET_LATEST_MESSAGES_URL)
-                latest_messages = messages_response.json()
-                latest_assistant_message = next((msg for msg in latest_messages if msg["role"] == "assistant"), None)
+                try:
+                    messages_response = requests.get(GET_LATEST_MESSAGES_URL)
+                    messages_response.raise_for_status()  # Raises an HTTPError for bad responses
+                    latest_messages = messages_response.json()
+                except requests.exceptions.HTTPError as http_err:
+                    logging.error(f"HTTP error occurred: {http_err}")
+                    send_message_to_slack(channel_id, "Failed to fetch latest messages due to a server error.")
+                    return jsonify({"status": "HTTP error"}), 200
+                except json.JSONDecodeError:
+                    logging.error("Failed to decode JSON from latest messages response.")
+                    send_message_to_slack(channel_id, "Failed to decode latest messages.")
+                    return jsonify({"status": "JSON decode error"}), 200
+                except Exception as err:
+                    logging.error(f"An unexpected error occurred: {err}")
+                    send_message_to_slack(channel_id, "An unexpected error occurred.")
+                    return jsonify({"status": "Unexpected error"}), 200
+
+                latest_assistant_message = next((msg for msg in latest_messages if msg.get("role") == "assistant"), None)
                 if latest_assistant_message:
                     send_message_to_slack(channel_id, latest_assistant_message.get("text", "No message found."))
                 else:
