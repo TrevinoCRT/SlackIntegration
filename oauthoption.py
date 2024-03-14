@@ -1093,11 +1093,12 @@ def sheets_oauth_callback():
     except Exception as e:
         current_app.logger.error(f"Failed to fetch token: {e}")
         return "Failed to complete authorization.", 500
-
-def initiate_and_send_data_with_delay():
+    
+def initiate_and_send_data_with_delay(channel_id, slack_bot_token, displayed_message_ids):
     create_thread()  # Assuming this function initializes a thread and sets `thread_id`
     time.sleep(3)  # Wait for 3 seconds
-    retrieve_and_send_data()  # Call the function to retrieve and send data
+    # Now passing the required arguments
+    retrieve_and_send_data(channel_id, slack_bot_token, displayed_message_ids)
 
 @oauth_bp.route('/start-assistant', methods=['POST'])
 def start_assistant():
