@@ -55,72 +55,70 @@ def verify_slack_request(request):
     
     return hmac.compare_digest(my_signature, slack_signature)
 
-block_kit_payload = {
-	"blocks": [
-		{
-			"type": "section",
-			"text": {
-				"type": "mrkdwn",
-				"text": "Welcome to the *Jira Story and Epic ID Bot*! This bot integrates Jira and Google Sheets with Slack, allowing you to manage projects and data seamlessly from within Slack."
-			}
-		},
-		{
-			"type": "section",
-			"text": {
-				"type": "mrkdwn",
-				"text": "To get started, you'll need to authorize the bot to access your Jira and Google Sheets accounts. Please click the buttons below to initiate the OAuth process."
-			}
-		},
-		{
-			"type": "divider"
-		},
-		{
-			"type": "actions",
-			"elements": [
-				{
-					"type": "button",
-					"text": {
-						"type": "plain_text",
-						"text": "Authorize Jira",
-						"emoji": True
-					},
-					"value": "jira_oauth",
-					"url": OAUTH_JIRA_URL
-				},
-				{
-					"type": "button",
-					"text": {
-						"type": "plain_text",
-						"text": "Authorize Google Sheets",
-						"emoji": True
-					},
-					"value": "sheets_oauth",
-					"url": OAUTH_SHEETS_URL
-				}
-			]
-		},
-		{
-			"type": "section",
-			"text": {
-				"type": "mrkdwn",
-				"text": "After authorization, you can start interacting with the bot by sending messages. For example, you can ask it to fetch data from Google Sheets or create and manage Jira issues directly from Slack."
-			}
-		},
-		{
-			"type": "section",
-			"text": {
-				"type": "mrkdwn",
-				"text": "If you need help or want to learn more about what you can do, just type `help` to see a list of commands and features."
-			}
-		}
-	]
-}
-
-
 def send_app_home_ui(user_id):
-    """Sends the Block Kit UI to the App Home of a specified user."""
     url = "https://slack.com/api/views.publish"
     headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"}
+    block_kit_payload = {
+        "type": "home",
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Welcome to the *Jira Story and Epic ID Bot*! This bot integrates Jira and Google Sheets with Slack, allowing you to manage projects and data seamlessly from within Slack."
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "To get started, you'll need to authorize the bot to access your Jira and Google Sheets accounts. Please click the buttons below to initiate the OAuth process."
+                }
+            },
+            {
+                "type": "divider"
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Authorize Jira",
+                            "emoji": True
+                        },
+                        "value": "jira_oauth",
+                        "url": OAUTH_JIRA_URL
+                    },
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Authorize Google Sheets",
+                            "emoji": True
+                        },
+                        "value": "sheets_oauth",
+                        "url": OAUTH_SHEETS_URL
+                    }
+                ]
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "After authorization, you can start interacting with the bot by sending messages. For example, you can ask it to fetch data from Google Sheets or create and manage Jira issues directly from Slack."
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "If you need help or want to learn more about what you can do, just type `help` to see a list of commands and features."
+                }
+            }
+        ]
+    }
     payload = {
         "user_id": user_id,
         "view": json.dumps(block_kit_payload)  # Ensure the view payload is JSON-encoded
@@ -130,8 +128,7 @@ def send_app_home_ui(user_id):
         logging.error(f"Error sending Block Kit UI to App Home: {response.text}")
     else:
         logging.info(f"Successfully sent Block Kit UI to App Home: {response.json()}")
-        # Log the response body for debugging
-        print(response.json())
+        print(response.json())  # Debug: Print the response
 
 
 @app.route('/slack/interactions', methods=['POST'])
