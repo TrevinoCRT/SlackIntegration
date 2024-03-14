@@ -161,29 +161,6 @@ def retrieve_and_send_data():
 
 
 # Jira OAuth Flow and API Integration
-# Class to handle OAuth callback for Jira API
-class JiraOAuthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-
-        # Parse the query parameters to get the authorization code
-        query = urlparse(self.path).query
-        query_components = parse_qs(query)
-        code = query_components.get('code', None)
-
-        if code:
-            self.wfile.write(b'Authorization successful. You may close this window.')
-            exchange_code_for_token(code[0])  # Exchange the code for a token
-        else:
-            self.wfile.write(b'Authorization failed.')
-
-# Function to start a local server for handling Jira OAuth callback
-def run_server():
-    server_address = ('', 8080)
-    httpd = HTTPServer(server_address, JiraOAuthHandler)
-    httpd.handle_request()
-
 # Function to exchange authorization code for an access token with Jira API
 def exchange_code_for_token(code):
     payload = {
@@ -193,24 +170,18 @@ def exchange_code_for_token(code):
         'code': code,
         'redirect_uri': REDIRECT_URI
     }
-    response = requests.post(TOKEN_URL, json=payload)
-
+    response = requests.post(TOKEN_URL, data=payload)
     if response.status_code == 200:
-        access_token = response.json().get('access_token')
-        save_access_token(access_token)
+        return response.json().get('access_token')
     else:
-        print('Failed to obtain access token. Error response:', response.json())
+        logging.error(f"Failed to obtain access token. Error response: {response.json()}")
+        raise Exception("Failed to obtain access token.")
 
 # Function to save Jira API access token to a file
 def save_access_token(token):
     with open('access_token.json', 'w') as token_file:
         json.dump({'access_token': token}, token_file)
 
-# Function to initiate the Jira OAuth flow by starting the local server and opening the authorization URL
-def start_oauth_flow():
-    threading.Thread(target=run_server, daemon=True).start()
-    time.sleep(2)  # Ensure the server is running
-    webbrowser.open(AUTHORIZATION_URL)
 
 # Function to retrieve the saved Jira API access token from a file
 def get_saved_access_token():
@@ -1039,9 +1010,13 @@ oauth_bp = Blueprint('oauth_bp', __name__)
 def start_oauth_jira():
     logging.info("Initiating Jira OAuth flow.")
     try:
-        start_oauth_flow()
-        logging.info("Jira OAuth flow initiated successfully.")
-        return jsonify({"status": "Jira OAuth flow initiated. Check your browser."})
+        # Generate the state parameter for CSRF protection
+        state = generate_state_parameter()
+        # Construct the authorization URL
+        authorization_url = f'https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id={CLIENT_ID}&scope={urllib.parse.quote(SCOPES)}&redirect_uri={urllib.parse.quote(REDIRECT_URI)}&state={state}&response_type=code&prompt=consent'
+        
+        # Redirect the user to the authorization URL
+        return redirect(authorization_url)
     except Exception as e:
         logging.error(f"Failed to initiate Jira OAuth flow: {e}", exc_info=True)
         return jsonify({"status": "Failed to initiate Jira OAuth flow", "error": str(e)})
@@ -1049,16 +1024,25 @@ def start_oauth_jira():
 @oauth_bp.route('/jira-callback', methods=['GET'])
 def jira_oauth_callback():
     logging.info("Received Jira OAuth callback request.")
+    error = request.args.get('error')
     code = request.args.get('code')
-    if code:
+    
+    if error:
+        logging.error(f"Error received from authorization server: {error}")
+        return jsonify({"error": f"Authorization server error: {error}"}), 400
+    if not code:
+        logging.warning("Authorization failed or was cancelled by the user.")
+        return "Authorization failed or was cancelled by the user.", 400
+
+    try:
         logging.info("Jira OAuth code received, exchanging for token.")
-        # Exchange the code for a token
-        exchange_code_for_token(code)
-        logging.info("Jira OAuth token exchange successful.")
+        access_token = exchange_code_for_token(code)
+        save_access_token(access_token)
+        logging.info("Jira OAuth token fetched and saved successfully.")
         return "Authorization successful. You may close this window."
-    else:
-        logging.warning("Jira OAuth callback received without code.")
-        return "Authorization failed."
+    except Exception as e:
+        logging.error(f"Failed to fetch token: {e}", exc_info=True)
+        return jsonify({"error": "Failed to complete authorization"}), 500
 
 @oauth_bp.route('/start-oauth-sheets', methods=['GET'])
 def start_oauth_sheets():
